@@ -235,9 +235,18 @@ class BrepSeg(pl.LightningModule):
             # masked出实际face feature
             pred_feature = out_face_feature[i][:end_index + 1]  # (n_node)
 
-            output_path = pathlib.Path("/home/zhang/datasets_segmentation/2_val")
+            # FIXED: Use configurable output path instead of hardcoded one
+            # Check for environment variable first, then fallback to default
+            default_output_path = os.path.join(os.getcwd(), "test_output", "features")
+            output_path_str = os.environ.get('FEATURE_OUTPUT_DIR', default_output_path)
+            
+            # Ensure the directory exists
+            os.makedirs(output_path_str, exist_ok=True)
+            
+            output_path = pathlib.Path(output_path_str)
             file_name = "feature_" + str(batch["id"][i].long().detach().cpu().numpy()) + ".txt"
             file_path = os.path.join(output_path, file_name)
+            
             feature_file = open(file_path, mode="a")
             for j in range(end_index):
                 feature_file.write(str(pred_feature[j]))
@@ -308,8 +317,7 @@ class BrepSeg(pl.LightningModule):
         # 学习策略
         scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=5,
                                                                threshold=0.0001, threshold_mode='rel',
-                                                               min_lr=0.000001, cooldown=2, verbose=False)
-
+                                                               min_lr=0.000001, cooldown=2)
         return {"optimizer": optimizer,
                 "lr_scheduler": {"scheduler": scheduler, "interval": "epoch", "frequency": 1, "monitor": "eval_loss"}
                 }
