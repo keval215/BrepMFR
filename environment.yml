@@ -8,6 +8,7 @@ channels:
 dependencies:
   - pytorch=1.13.1
   - dgl=1.0.0.cu117=py39_0
+  - pip=23.3.1  # Add this line for compatibility
   - pip:
       - pytorch-lightning==1.7.1
       - torch-geometric==2.3.1
