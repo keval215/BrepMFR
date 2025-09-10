@@ -37,12 +37,34 @@ class CADSynth(Dataset):
 
     def _get_filenames(self, root_dir, filelist):
         print(f"Loading data...")
-        with open(str(root_dir / f"{filelist}"), "r") as f:
+
+        # Case 1: split.txt is directly inside root_dir
+        direct_file = root_dir / filelist
+
+        # Case 2: split.txt is inside subfolder (e.g., /train/train.txt)
+        subfolder_file = root_dir / self.split / filelist
+
+        if direct_file.exists():
+            filepath = direct_file
+            print(f"✅ Found filelist at {filepath}")
+        elif subfolder_file.exists():
+            filepath = subfolder_file
+            print(f"✅ Found filelist at {filepath}")
+        else:
+            raise FileNotFoundError(
+                f"❌ Could not find {filelist} in either {direct_file} or {subfolder_file}"
+            )
+
+        with open(str(filepath), "r") as f:
             file_list = [x.strip() for x in f.readlines()]
-        for x in tqdm(root_dir.rglob(f"*[0-9].bin")):
+
+        # Search for matching .bin files under the folder where the txt lives
+        search_dir = filepath.parent
+        for x in tqdm(search_dir.rglob(f"*[0-9].bin")):
             if x.stem in file_list:
                 self.file_paths.append(x)
-        print("Done loading {} files".format(len(self.file_paths)))
+
+        print("✅ Done loading {} files from {}".format(len(self.file_paths), search_dir))
 
 
     def load_one_graph(self, file_path):

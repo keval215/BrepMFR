@@ -44,3 +44,6 @@ The best checkpoints based on the smallest validation loss are saved in the resu
 python segmentation.py test --dataset_path /path/to/dataset --checkpoint ./results/BrepMFR/best.ckpt --batch_size 64
 ```
 
+
+
+AlgorithmError: ExecuteUserScriptError: ExitCode 1 ErrorMessage "TypeError: can't multiply sequence by non-int of type 'float' During handling of the above exception, another exception occurred Traceback (most recent call last) File "/opt/ml/code/train_entry.py", line 439, in main result = segmentation.main() File "/opt/ml/code/segmentation.py", line 187, in main model = BrepSeg(args) File "/opt/ml/code/models/brepseg_model.py", line 91, in __init__ self.brep_encoder = BrepEncoder( File "/opt/ml/code/models/modules/brep_encoder.py", line 67, in __init__ self.graph_node_feature = GraphNodeFeature( File "/opt/ml/code/models/modules/layers/brep_encoder_layer.py", line 189, in __init__ in_channels=7, output_dims=int(0.5*hidden_dim) File "/opt/ml/code/train_entry.py", line 437, in main result = segmentation.main(checkpoint_manager=checkpoint_manager) ERROR:torch.distributed.elastic.multiprocessing.api:failed (exitcode: 1) local_rank: 0 (pid: 192) of binary: /opt/conda/bin/python3.9 File "/opt/c
