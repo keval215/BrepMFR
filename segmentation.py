@@ -50,13 +50,11 @@ def main(checkpoint_manager=None):
     parser.add_argument("--attention_dropout", type=float, default=0.3)
     parser.add_argument("--act-dropout", type=float, default=0.3)
     parser.add_argument("--d_model", type=int, default=512)
-    parser.add_argument("--dim_node", type=int, default=256)
+    parser.add_argument("--dim_node", type=int, default=256)  # This is the critical parameter
     parser.add_argument("--n_heads", type=int, default=32)
     parser.add_argument("--n_layers_encode", type=int, default=8)
     
     # Add distributed training arguments (avoid conflicts with Lightning)
-    # REMOVED: parser.add_argument("--max_epochs", type=int, default=100, help="Maximum number of epochs")
-    # Don't add --gpus here, let Lightning handle it
     parser.add_argument("--nodes", type=int, default=1, help="Number of nodes")
     
     # Add Lightning's arguments FIRST, then we can override defaults
@@ -75,21 +73,49 @@ def main(checkpoint_manager=None):
         if key.startswith('SM_HP_'):
             param_name = key[6:].lower()  # Remove 'SM_HP_' prefix
             try:
-                # Try to convert to appropriate type
-                if param_name in ['batch_size', 'num_workers', 'num_classes', 'max_epochs', 'gpus', 'nodes']:
+                # Try to convert to appropriate type based on parameter name
+                if param_name in ['batch_size', 'num_workers', 'num_classes', 'max_epochs', 'gpus', 'nodes', 'd_model', 'dim_node', 'n_heads', 'n_layers_encode']:
                     sm_hyperparams[param_name] = int(value)
                 elif param_name in ['dropout', 'attention_dropout', 'act_dropout']:
                     sm_hyperparams[param_name] = float(value)
                 else:
                     sm_hyperparams[param_name] = value
             except ValueError:
+                print(f"Warning: Could not convert {param_name}={value} to expected type, keeping as string")
                 sm_hyperparams[param_name] = value
     
-    # Update args with SageMaker hyperparameters
+    # FIXED: Update args with SageMaker hyperparameters with proper type conversion
     for key, value in sm_hyperparams.items():
         if hasattr(args, key):
-            setattr(args, key, value)
-            print(f"Updated {key} = {value} from SageMaker hyperparameters")
+            # Get the original argument's type and convert accordingly
+            original_value = getattr(args, key)
+            try:
+                if isinstance(original_value, int):
+                    value = int(value)
+                elif isinstance(original_value, float):
+                    value = float(value)
+                elif isinstance(original_value, bool):
+                    value = str(value).lower() in ('true', '1', 'yes', 'on')
+                # Keep as string for other types
+                
+                setattr(args, key, value)
+                print(f"Updated {key} = {value} ({type(value).__name__}) from SageMaker hyperparameters")
+            except (ValueError, TypeError) as e:
+                print(f"Warning: Could not convert {key}={value} to type {type(original_value).__name__}: {e}")
+                print(f"Keeping original value: {key}={original_value}")
+    
+    # ADDITIONAL SAFETY CHECK: Ensure critical parameters are integers
+    critical_int_params = ['dim_node', 'd_model', 'n_heads', 'n_layers_encode', 'batch_size', 'num_classes']
+    for param in critical_int_params:
+        if hasattr(args, param):
+            value = getattr(args, param)
+            if isinstance(value, str):
+                try:
+                    setattr(args, param, int(value))
+                    print(f"SAFETY: Converted {param} from string '{value}' to int {int(value)}")
+                except ValueError:
+                    print(f"ERROR: Could not convert {param}='{value}' to integer")
+                    raise ValueError(f"Parameter {param} must be an integer, got '{value}'")
     
     # Detect distributed training environment
     world_size = int(os.environ.get('WORLD_SIZE', 1))
@@ -107,14 +133,14 @@ def main(checkpoint_manager=None):
         print(f"Multi-GPU setup: 1 node, {num_gpus_available} GPUs")
         
         strategy = DDPStrategy(
-            find_unused_parameters=False,
+            find_unused_parameters=True,
             gradient_as_bucket_view=True,
         )
         devices = num_gpus_available  # Use all available GPUs
         num_nodes = 1
     else:
         # Single GPU or CPU
-        strategy = "auto"
+        strategy = "single_device"
         devices = 1 if torch.cuda.is_available() else None
         num_nodes = 1
         print("Single GPU/CPU setup")
@@ -143,8 +169,8 @@ def main(checkpoint_manager=None):
     # Configure trainer for distributed training
     trainer = Trainer(
         max_epochs=args.max_epochs,
-        accelerator='gpu' if torch.cuda.is_available() else 'cpu',
-        devices=devices,
+        accelerator='gpu' if torch.cuda.is_available() and devices else 'cpu',
+        devices=devices if torch.cuda.is_available() else None,
         num_nodes=num_nodes,
         strategy=strategy,
         callbacks=[checkpoint_callback],
@@ -179,30 +205,40 @@ def main(checkpoint_manager=None):
       - Max epochs: {args.max_epochs}
       - Strategy: {strategy}
     
+    Model parameters:
+      - dim_node: {args.dim_node} ({type(args.dim_node).__name__})
+      - d_model: {args.d_model} ({type(args.d_model).__name__})
+      - n_heads: {args.n_heads} ({type(args.n_heads).__name__})
+      - n_layers_encode: {args.n_layers_encode} ({type(args.n_layers_encode).__name__})
+    
     Logs written to /opt/ml/model/logs/{args.experiment_name}/{month_day}_{hour_min_second}
     Checkpoints written to {checkpoint_dir}
     -----------------------------------------------------------------------------------
         """)
         
+        # DEBUG: Print parameter types before model creation
+        print("DEBUG: Parameter types before model initialization:")
+        for param in ['dim_node', 'd_model', 'n_heads', 'n_layers_encode', 'batch_size', 'num_classes']:
+            if hasattr(args, param):
+                value = getattr(args, param)
+                print(f"  {param}: {value} ({type(value).__name__})")
+        
         model = BrepSeg(args)
         
         # Verify data paths
         train_path = os.path.join(args.dataset_path, "train")
-        val_path = os.path.join(args.dataset_path, "validation")  # Note: might be "val" or "validation"
+        val_path = os.path.join(args.dataset_path, "val")
         
-        if not os.path.exists(train_path):
-            train_path = os.path.join(args.dataset_path, "train")
-            print(f"Training data path: {train_path}")
-            print(f"Training data exists: {os.path.exists(train_path)}")
-            if os.path.exists(args.dataset_path):
-                print(f"Contents of {args.dataset_path}: {os.listdir(args.dataset_path)}")
+        print(f"Training data path: {train_path}")
+        print(f"Training data exists: {os.path.exists(train_path)}")
+        print(f"Validation data path: {val_path}")
+        print(f"Validation data exists: {os.path.exists(val_path)}")
         
-        if not os.path.exists(val_path):
-            val_path = os.path.join(args.dataset_path, "val")
-            print(f"Validation data path: {val_path}")
-            print(f"Validation data exists: {os.path.exists(val_path)}")
+        if os.path.exists(args.dataset_path):
+            print(f"Contents of {args.dataset_path}: {os.listdir(args.dataset_path)}")
         
         try:
+            print("Loading data...")
             train_data = Dataset(root_dir=args.dataset_path, split="train", random_rotate=True, num_class=args.num_classes)
             val_data = Dataset(root_dir=args.dataset_path, split="val", random_rotate=False, num_class=args.num_classes)
             

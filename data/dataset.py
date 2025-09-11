@@ -131,9 +131,9 @@ class CADSynth(Dataset):
             shuffle=shuffle,
             collate_fn=self._collate,
             num_workers=num_workers,
-            drop_last=True,
+            drop_last=False,  # Don't drop last batch for small datasets
             pin_memory=True,
-            prefetch_factor=2,
+            prefetch_factor=2 if num_workers > 0 else None,
             persistent_workers=False
         )
 
@@ -281,6 +281,6 @@ class TransferDataset(Dataset):
             num_workers=num_workers,
             drop_last=True,
             pin_memory=True,
-            prefetch_factor=2,
+            prefetch_factor=2 if num_workers > 0 else None,
             persistent_workers=False
         )

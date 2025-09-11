@@ -255,43 +255,65 @@ def install_all_dependencies():
     if not safe_pip_install(["torchmetrics==0.11.4"]): # Install torchmetrics separately
         return False
 
-    # Step 3: PyTorch Lightning - Install dependencies first, then Lightning itself with --no-deps
-    logger.info("🔧 Installing PyTorch Lightning 1.7.1 dependencies...")
+      # Step 3: PyTorch Lightning - Install dependencies first, then Lightning itself with --no-deps
+    logger.info("🔧 Installing PyTorch Lightning 1.8.6 dependencies...")
     lightning_deps = [
         "pyDeprecate>=0.3.1,<0.4.0",
         "tensorboard>=2.9.1",
-        "lightning-utilities>=0.3.0,<0.9.0"
+        "lightning-utilities>=0.3.0,<0.9.0",
+        "tensorboardX"  # 🔥 Add this missing dep to avoid ModuleNotFoundError
     ]
     for dep in lightning_deps:
-        if not safe_pip_install([dep], allow_failure=True): # Allow some deps to fail
+        if not safe_pip_install([dep], allow_failure=True):  # Allow some deps to fail
             logger.warning(f"⚠️ Could not install {dep}, continuing...")
 
-    logger.info("🔧 Installing PyTorch Lightning 1.7.1 itself (--no-deps)...")
+    logger.info("🔧 Installing PyTorch Lightning 1.8.6 itself (--no-deps)...")
     # Now install Lightning itself without its dependencies
-    if not safe_pip_install(["pytorch-lightning==1.7.1"], ["--no-deps"]):
-        logger.error("❌ Failed to install pytorch-lightning==1.7.1 even with pip 23.3.1")
+    if not safe_pip_install(["pytorch-lightning==1.8.6"], ["--no-deps"]):
+        logger.error("❌ Failed to install pytorch-lightning==1.8.6 even with pip 23.3.1")
         return False
-    logger.info("✅ PyTorch Lightning 1.7.1 installed")
+    logger.info("✅ PyTorch Lightning 1.8.6 installed")
 
-    # Step 4: DGL & Geometric
-    if not safe_pip_install(["dgl==1.0.0"]):
-        return False
-    if not safe_pip_install(["torch-geometric==2.2.0"]):
-        return False
+    # Patch _old_init runtime issue
+    try:
+        import pytorch_lightning.utilities.data as pl_data
+        if hasattr(pl_data, "_replace_init_method"):
+            _old_method = pl_data._replace_init_method
+            def _patched_replace_init_method(cls):
+                if hasattr(cls, "_old_init"):
+                    del cls._old_init
+                return _old_method(cls)
+            pl_data._replace_init_method = _patched_replace_init_method
+            logger.info("✅ Patched _old_init safely at runtime")
+    except Exception as e:
+        logger.warning(f"⚠️ Could not patch _old_init: {e}")
 
-    # Step 5: Geometric extensions
+
+# Step 5: Geometric extensions + PyTorch Geometric
+    pyg_url = "https://data.pyg.org/whl/torch-1.13.0+cu117.html"  # Match your CUDA version
+    
     geo_pkgs = [
-        "torch-scatter==2.1.1+pt113cu116",
-        "torch-sparse==0.6.17+pt113cu116",
-        "torch-cluster==1.6.1+pt113cu116",
-        "torch-spline-conv==1.2.2+pt113cu116"
+        "torch-scatter==2.1.1+pt113cu117",  # Fixed CUDA version
+        "torch-sparse==0.6.17+pt113cu117",
+        "torch-cluster==1.6.1+pt113cu117", 
+        "torch-spline-conv==1.2.2+pt113cu117"
     ]
+    
     for pkg in geo_pkgs:
         if not safe_pip_install([pkg], ["-f", pyg_url], allow_failure=True):
             base = pkg.split('+')[0]
-            logger.warning(f"⚠️ Falling back to CPU version: {base}")
-            if not safe_pip_install([base], allow_failure=True):
-                logger.warning(f"⚠️ Could not install {base} either, continuing...")
+            logger.warning(f"Falling back to CPU version: {base}")
+            safe_pip_install([base], allow_failure=True)
+
+    # Install PyTorch Geometric itself (this was missing!)
+    logger.info("Installing PyTorch Geometric...")
+    if not safe_pip_install(["torch-geometric==2.2.0"], ["-f", pyg_url], allow_failure=True):
+        # Fallback to latest version
+        if not safe_pip_install(["torch-geometric"], ["-f", pyg_url]):
+            logger.error("Failed to install torch-geometric")
+            return False
+
+    logger.info("PyTorch Geometric installation completed")
 
     # Step 6: Critical missing deps
     if not safe_pip_install(["prefetch_generator"]):
@@ -362,14 +384,19 @@ def verify_installations():
 def check_data_paths():
     logger = logging.getLogger(__name__)
     data_path = "/opt/ml/input/data"
+    required = ["train", "val", "test"]
+
     if not os.path.exists(data_path):
         logger.error(f"❌ Data path not found: {data_path}")
         return False
-    train_path = os.path.join(data_path, "train")
-    if not os.path.exists(train_path):
-        logger.error(f"❌ Training data not found: {train_path}")
-        return False
-    logger.info(f"✅ Training data found: {train_path}")
+
+    for split in required:
+        split_path = os.path.join(data_path, split)
+        if not os.path.exists(split_path):
+            logger.error(f"❌ {split} data not found: {split_path}")
+            return False
+        logger.info(f"✅ {split} data found: {split_path}")
+
     return True
 
 
